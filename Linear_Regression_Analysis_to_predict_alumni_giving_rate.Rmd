@@ -1,0 +1,270 @@
+---
+title: "Linear_Regression_Analysis_to_predict_alumni_giving_rate"
+author: "Pravallika Mulukuri"
+date: "5/21/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Chapter 1: Introduction
+
+* The goal of this project is to build a linear regression model that can predict alumni giving rate if certain attributes related to university are given. 
+* The regression model is built from alumni dataset that contains 48 observations and has four variables of interest - percentage of classes under 20, student faculty ratio, private and alumni giving rate.
+* This model would be helpful in finding factors that influence alumni donation rate which would help management of an university to take necessary steps in that direction. 
+* This would help university to get more funds helping them to further improve these factors. This becomes a continuous cycle. 
+
+## Chapter 2: Exploratory Data Analysis
+
+
+```{r }
+url <- "https://bgreenwell.github.io/uc-bana7052/data/alumni.csv"
+alumni <- read.csv(url)
+dim(alumni)
+alumni <- alumni[c(2,3,4,5)]
+sapply(alumni, class)
+alumni$private=as.factor(alumni$private)
+summary(alumni)
+boxplot(alumni, use.cols = TRUE)
+pairs(alumni, cex = 1.2, pch = 19, col = adjustcolor("darkred", alpha.f = 0.5))
+GGally::ggpairs(alumni)
+library(dplyr)
+library(car)
+alumni %>%
+  lm(alumni_giving_rate ~ student_faculty_ratio + percent_of_classes_under_20 , data = .) %>%
+  vif()
+
+```
+
+#### Exploring Summary Statistics of all variables
+
+* The dataset alumni contains 48 observations and has four variables of interest - percentage of classes under 20, student faculty ratio, private and alumni giving rate. There are no missing values in these four variables.
+* We would be using alumni giving rate as response variable and rest of the 3 variables would be considered as predictor variables
+*	Exploring Summary Statistics of all variables
+* Summary statistics of the variables of interest
+    + Private is a categorical variable
+    + The response variable has the highest range of 60
+    + The Mean and median of percent_of_class_under_20 is not similar suggesting a non-symmetric distribution. The distribution looks left skewed.
+
+#### Exploring variables individually and interaction between variables
+
+*	The distribution of variables percent of classes under 200 and student faculty ratio looks bimodal. One peak for could be for private and another peak for non-private universities. The distribution of variable alumni giving rate looks approximately normal. 
+*	There is positive linear relationship between alumni giving rate and percent ofclassesunder20
+*	There is negative linear relationship between alumni giving rate and student faculty ratio
+*	There seems to be a negative relationship between percent of classes under 20 and student faculty ratio. There can be a problem of multicollinearity. When we check the the VIF value we the value of it as 2.61. This is far less than 10. Hence there is no multicollinearity between these two variables
+
+## Chapter 3: Model Selection
+
+For model selection, we try all models from no effect to 3- way interactions based on AIC and BIC using 3 ways of model selection – forward selection, backward elimination and step wise selection.
+
+Code:
+
+```{r}
+fit_min <- lm(alumni_giving_rate ~ 1, data = alumni)
+fit_max_2 <- lm(alumni_giving_rate ~ .^3, data = alumni)
+fs_1 <- step(fit_min, direction = "forward", 
+             scope = list(lower = fit_min,
+                          upper = fit_max_2),
+             trace = 0, k = log(nrow(alumni)))
+be_1 <- step(fit_max_2, direction = "backward", 
+             trace = 0, k = log(nrow(alumni)))
+be_2 <- step(fit_max_2, direction = "backward", 
+             trace = 0, k = 2)
+ss_1 <- step(be_2, direction = "both", 
+             scope = list(lower = fit_min,
+                          upper = fit_max_2),
+             trace = 0, k = log(nrow(alumni)))
+fs_2 <- step(fit_min, direction = "forward", 
+             scope = list(lower = fit_min,
+                          upper = fit_max_2),
+             trace = 0, k = 2)
+
+ss_2 <- step(be_2, direction = "both", 
+             scope = list(lower = fit_min,
+                          upper = fit_max_2),
+             trace = 0, k = 2)
+
+```
+
+#### Function to compute the PRESS statistic (a form of cross-validation). Note: smaller is better!
+
+```{r}
+
+PRESS <- function(object, ...) {
+  if(!missing(...)) {
+    res <- sapply(list(object, ...), FUN = function(x) {
+      sum(rstandard(x, type = "predictive") ^ 2)
+    })
+    names(res) <- as.character(match.call()[-1L])
+    res
+  } else {
+    sum(rstandard(object, type = "predictive") ^ 2)
+  }
+}
+
+```
+
+#### Function to compute various model metrics
+
+```{r}
+
+modelMetrics <- function(object, ...) {
+  if(!missing(...)) {
+    res <- sapply(list(object, ...), FUN = function(x) {
+      c("AIC" = AIC(x), "BIC" = BIC(x), 
+        "adjR2" = summary(x)$adj.r.squared,
+        "RMSE"  = sigma(x), "PRESS" = PRESS(x), 
+        "nterms" = length(coef(x)))
+    })
+    colnames(res) <- as.character(match.call()[-1L])
+    res
+  } else {
+    c("AIC" = AIC(object), "BIC" = BIC(object), 
+      "adjR2" = summary(object)$adj.r.squared, 
+      "RMSE"  = sigma(object), "PRESS" = PRESS(object),
+      "nterms" = length(coef(object)))
+  }
+}
+```
+
+
+#### Comparing models
+
+```{r}
+res <- modelMetrics(be_1,fs_1,ss_1,be_2,fs_2,ss_2)
+round(res, digits = 3)
+```
+
+Based on the above parameters mainly PRESS and adjusted R-squated value, we have 2 major choices
+
+##### Model 1: 
+
+##### alumni_giving_rate ~ student_faculty_ratio
+
+##### Observations:
+
+* This model has only one predictor variable(student_faculty_ratio) making it simple model
+* The sign of the estimated parameter is in sync with the negative relationship between response variable and student_faculty_ratio. The p-value<0.05 of the t-test helps us to reject the null hypothesis(\beta_1=0) 
+* The adjusted R-squared value of this model is 0.5414
+* The p-value of F-statistic is also less than 0.05 which helps to reject the null hypothesis (\beta_1=0) which is similar to t-test in this case.
+	The PRESS value of this model is 4138.88 
+
+##### Model 2: 
+
+##### alumni_giving_rate ~ percent_of_classes_under_20 + student_faculty_ratio + private + percent_of_classes_under_20:student_faculty_ratio
+
+##### Observations:
+
+* This model has only four predictor variable(student_faculty_ratio) including an interaction variable between percent_classes_under_20 and student_faculty_ratio
+* The sign of the estimated parameter of student_faculty_ratio is not in sync with the negative relationship between response variable and student_faculty_ratio. The p-value>0.05 of the t-test doesnot allow us to reject the null hypothesis(\beta_1=0) 
+* The adjusted R-squared value of this model is 0.5745
+* The p-value of F-statistic is less than 0.05 which helps to reject the null hypothesis
+ (\beta_1=\beta_2=\beta_3=\beta_4=0) 
+* The PRESS value of this model is 4020.749
+
+Considering below factors we choose our model to be model 1.
+a. Model 1 is a very simple model with only 1 predictor variable
+b. There is not much improvement in the value of adjusted R-squared as we include more variables and interaction between variables as seen in model 2
+c. The model 2 doesnot capture the correct trend between response variable and predictor variable. (sign of estimated parameter of student_faculty_Ratio is opposite)
+
+Therefore our model is
+
+####              alumni_giving_rate = 53.0138 - 2.0572(student_faculty_ratio) 
+
+* The adjusted R-squated value for this model is 0.5414.
+* This model states that for every one unit increase in student_faculty_ratio, the alumni_giving_rate decreases by 2.0572 units
+
+
+## Chapter 4: Model Diagnostic Analysis
+
+We look at different diagnostic plots to know the adequacy of the selected regression model
+
+```{r}
+yhat <- fitted(ss_2)
+rstan <- rstandard(ss_2)
+library(broom)
+alumni2 <- alumni %>%
+  lm(alumni_giving_rate ~ percent_of_classes_under_20 + student_faculty_ratio + private + percent_of_classes_under_20:student_faculty_ratio, data = .) %>%
+  augment() %>%
+  mutate(row_num = 1:n())
+
+library(ggplot2)
+#yhat vs residuals
+ggplot(alumni2, aes(x = .fitted, y = .std.resid)) +
+  geom_point(alpha = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red2") +
+  geom_hline(yintercept = c(-2, 2), linetype = "dotted") +
+  # geom_smooth(color = "forestgreen", alpha = 0.1, se = FALSE) +
+  xlab("Fitted value") +
+  ylab("Standardized residual") +
+  theme_light()
+
+#QQ plot
+ggplot(alumni2, aes(sample = .std.resid)) +
+  geom_qq(alpha = 0.3) +
+  geom_qq_line(linetype = "dashed", color = "red2") +
+  xlab("Theoretical quantile") +
+  ylab("Sample quantile") +
+  theme_light()
+  
+ggplot(alumni2, aes(x = row_num, y = .std.resid)) +
+  geom_point(alpha = 0.3) +
+  geom_line() +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red2") +
+  xlab("Index") +
+  ylab("Standardized residual") +
+  theme_light()
+
+ggplot(alumni2, aes(x = percent_of_classes_under_20, y = .std.resid)) +
+  geom_point(alpha = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red2") +
+  geom_hline(yintercept = c(-2, 2), linetype = "dotted") +
+  geom_smooth(color = "forestgreen", alpha = 0.1, se = FALSE) +
+  ylab("Standardized residual") +
+  theme_light()
+
+ggplot(alumni2, aes(x = student_faculty_ratio, y = .std.resid)) +
+  geom_point(alpha = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red2") +
+  geom_hline(yintercept = c(-2, 2), linetype = "dotted") +
+  geom_smooth(color = "forestgreen", alpha = 0.1, se = FALSE) +
+  ylab("Standardized residual") +
+  theme_light()
+
+ggplot(alumni2, aes(x = private, y = .std.resid)) +
+  geom_point(alpha = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red2") +
+  geom_hline(yintercept = c(-2, 2), linetype = "dotted") +
+  geom_smooth(color = "forestgreen", alpha = 0.1, se = FALSE) +
+  ylab("Standardized residual") +
+  theme_light()
+
+#outliers
+h <- hatvalues(ss_2)
+plot(h, type = "h", ylim = extendrange(h, f = 0.15))
+abline(h = 2 * 5 / nrow(alumni), lty = "dotted")
+text(h, labels = seq_len(nrow(alumni)), pos = 3, col = "red2")
+
+
+```
+
+#### Observations:
+* The varainace looks constant – The residuals are randomly scattered against both fitted values and predictor variable student_faculty_ratio
+* There seems to be no misspecification of mean
+* The error look approximately normally distributed from QQ plot. It looks slightly right skewed
+* Therefore we can conclude that our model looks ideal.
+* Our Final model is 
+
+####           alumni_giving_rate = 53.0138 - 2.0572(student_faculty_ratio) 
+
+## Chapter 5: Discussion and Future Scope
+
+1. Scope for improvement with variable tranformation: We haven’t considered variable transformation for both predictor and response variables which could help in building model with better model metrics.
+2. Interaction between variables: Though the value of VIF between percent of classes under 20 and student faculty ratio is very low, there is clear negative linear relation between these two variables. This has to be further explored.
+
+## Chapter 6: Summary
+ 
+Using Linear Regression, we developed a model to predict the alumni giving rate of universities. According to the final model, the alumni giving rate is dependent on student faculty ration of the university. For every unit increase in the student faculty ratio, the alumni giving rate decreases by 2.0572. This suggests universities to either have fewer intake of students or hire more faculty to maintain a better student faculty ratio. This would increase the university’s income from alumni.
+
